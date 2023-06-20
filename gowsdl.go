@@ -302,6 +302,7 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 		"removePointerFromType":    removePointerFromType,
 		"setNS":                    g.setNS,
 		"getNS":                    g.getNS,
+		"wrapElement":              wrapElement,
 	}
 
 	data := new(bytes.Buffer)
@@ -542,18 +543,18 @@ func toGoType(xsdType string, nillable bool) string {
 
 	value := xsd2GoTypes[strings.ToLower(t)]
 
-	if value != "" {
-		if nillable {
-			value = "*" + value
-		}
-		return value
+	if value == "" {
+		value = replaceReservedWords(makePublic(t))
 	}
 
-	return "*" + replaceReservedWords(makePublic(t))
+	if nillable {
+		value = "*" + value
+	}
+	return value
 }
 
 func removePointerFromType(goType string) string {
-	return regexp.MustCompile("^\\s*\\*").ReplaceAllLiteralString(goType, "")
+	return regexp.MustCompile(`^\\s*\\*`).ReplaceAllLiteralString(goType, "")
 }
 
 // Given a message, finds its type.
@@ -658,6 +659,15 @@ func makePublic(identifier string) string {
 
 	field[0] = unicode.ToUpper(field[0])
 	return string(field)
+}
+
+func wrapElement(elements []*XSDElement, parentName string) interface{} {
+	type wrappedElement struct {
+		ParentName string
+		Elements   []*XSDElement
+	}
+	return wrappedElement{parentName, elements}
+
 }
 
 var basicTypes = map[string]string{
