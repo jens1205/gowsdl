@@ -81,7 +81,8 @@ var typesTmpl = `
 {{define "Elements"}}
 	{{range .}}
 		{{if ne .Ref ""}}
-			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable }} ` + "`" + `xml:"{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
+	        {{ $prefix := getNSPrefix .Ref }}
+			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable }} ` + "`" + `xml:"{{getNSFromMap $prefix}} {{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
 		{{if not .Type}}
 			{{if .SimpleType}}
@@ -109,6 +110,7 @@ var typesTmpl = `
 
 {{range .Schemas}}
 	{{ $targetNamespace := setNS .TargetNamespace }}
+	{{ $foo := setNSMap .Xmlns }}
 
 	{{range .SimpleType}}
 		{{template "SimpleType" .}}
