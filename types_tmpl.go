@@ -90,7 +90,7 @@ var typesTmpl = `
 	{{range .Elements}}
 		{{if ne .Ref ""}}
 	        {{ $prefix := getNSPrefix .Ref }}
-			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable .MinOccurs }} ` + "`" + `xml:"{{getNSFromMap $prefix}} {{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
+			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable .MinOccurs }} ` + "`" + `xml:"{{getNSFromMap $prefix}}{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
 		{{if not .Type}}
 			{{if .SimpleType}}

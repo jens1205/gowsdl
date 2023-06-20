@@ -56,12 +56,11 @@ func (g *GoWSDL) setNSMap(nsMap map[string]string) map[string]string {
 	return nsMap
 }
 
-func (g *GoWSDL) getNSMap() map[string]string {
-	return g.currentNamespaceMap
-}
-
 func (g *GoWSDL) getNSFromMap(prefix string) string {
-	return g.currentNamespaceMap[prefix]
+	if result, ok := g.currentNamespaceMap[prefix]; ok {
+		return result + " "
+	}
+	return ""
 }
 
 var cacheDir = filepath.Join(os.TempDir(), "gowsdl-cache")
