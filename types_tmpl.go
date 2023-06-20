@@ -37,9 +37,9 @@ var typesTmpl = `
 		{{$baseType}}
 	{{end}}
 
-	{{template "Elements" .Extension.Sequence}}
-	{{template "Elements" .Extension.Choice}}
-	{{template "Elements" .Extension.SequenceChoice}}
+	{{template "Elements" wrapElement .Extension.Sequence ""}}
+	{{template "Elements" wrapElement .Extension.Choice ""}}
+	{{template "Elements" wrapElement .Extension.SequenceChoice ""}}
 	{{template "Attributes" .Extension.Attributes}}
 {{end}}
 
@@ -61,25 +61,33 @@ var typesTmpl = `
 {{end}}
 
 {{define "ComplexTypeInline"}}
-	{{replaceReservedWords .Name | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}struct {
-	{{with .ComplexType}}
-		{{if ne .ComplexContent.Extension.Base ""}}
-			{{template "ComplexContent" .ComplexContent}}
-		{{else if ne .SimpleContent.Extension.Base ""}}
-			{{template "SimpleContent" .SimpleContent}}
-		{{else}}
-			{{template "Elements" .Sequence}}
-			{{template "Elements" .Choice}}
-			{{template "Elements" .SequenceChoice}}
-			{{template "Elements" .All}}
-			{{template "Attributes" .Attributes}}
-		{{end}}
+	{{$parentName := .ParentName}}
+	{{range .Elements}}
+	  {{$name := .Name}}
+	    {{with .ComplexType}}
+	    {{$fullName := print $parentName "_" $name}}
+		{{$typeName := replaceReservedWords $fullName | makePublic}}
+		type {{$typeName}} struct {
+	    	{{if ne .ComplexContent.Extension.Base ""}}
+	    		{{template "ComplexContent" .ComplexContent}}
+	    	{{else if ne .SimpleContent.Extension.Base ""}}
+	    		{{template "SimpleContent" .SimpleContent}}
+	    	{{else}}
+	    		{{template "Elements" wrapElement .Sequence $name}}
+	    		{{template "Elements" wrapElement .Choice $name}}
+	    		{{template "Elements" wrapElement .SequenceChoice $name}}
+	    		{{template "Elements" wrapElement .All $name}}
+	    	{{end}}
+	    }
+	    {{end}}
+
 	{{end}}
-	} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + `
+
 {{end}}
 
 {{define "Elements"}}
-	{{range .}}
+	{{$parentName := .ParentName}}
+	{{range .Elements}}
 		{{if ne .Ref ""}}
 			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable }} ` + "`" + `xml:"{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
@@ -91,9 +99,11 @@ var typesTmpl = `
 				{{else}}
 					{{ normalize .Name | makeFieldPublic}} {{toGoType .SimpleType.Restriction.Base false}} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + `
 				{{end}}
-			{{else}}
-				{{template "ComplexTypeInline" .}}
 			{{end}}
+	        {{if .ComplexType}}
+				{{if .Doc}} {{.Doc | comment}} {{end}}
+	            {{replaceReservedWords .Name | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}} {{toGoType $parentName .Nillable}}_{{.Name}} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + `
+	        {{end}}
 		{{else}}
 			{{if .Doc}}{{.Doc | comment}} {{end}}
 			{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Type .Nillable }} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + ` {{end}}
@@ -127,14 +137,18 @@ var typesTmpl = `
 					{{else if ne .SimpleContent.Extension.Base ""}}
 						{{template "SimpleContent" .SimpleContent}}
 					{{else}}
-						{{template "Elements" .Sequence}}
-						{{template "Any" .Any}}
-						{{template "Elements" .Choice}}
-						{{template "Elements" .SequenceChoice}}
-						{{template "Elements" .All}}
+						{{template "Elements" wrapElement .Sequence $name}}
+						{{template "Any" .Any }}
+						{{template "Elements" wrapElement .Choice $name}}
+						{{template "Elements" wrapElement .SequenceChoice $name}}
+						{{template "Elements" wrapElement .All $name}}
 						{{template "Attributes" .Attributes}}
 					{{end}}
 				}
+			    {{template "ComplexTypeInline" wrapElement .Sequence $name}}
+			    {{template "ComplexTypeInline" wrapElement .Choice $name}}
+			    {{template "ComplexTypeInline" wrapElement .SequenceChoice $name}}
+			    {{template "ComplexTypeInline" wrapElement .All $name}}
 			{{end}}
 			{{/* SimpleTypeLocal */}}
 			{{with .SimpleType}}
@@ -150,7 +164,7 @@ var typesTmpl = `
 				{{else}}
 					type {{$typeName}} interface{}
 				{{end}}
-			
+
 				{{if .Restriction.Enumeration}}
 				const (
 					{{with .Restriction}}
@@ -200,6 +214,7 @@ var typesTmpl = `
 		{{if and (eq (len .SimpleContent.Extension.Attributes) 0) (eq (toGoType .SimpleContent.Extension.Base false) "string") }}
 			type {{$typeName}} string
 		{{else}}
+	        // in main template - ComplexTypes
 			type {{$typeName}} struct {
 				{{$type := findNameByType .Name}}
 				{{if ne .Name $type}}
@@ -211,14 +226,19 @@ var typesTmpl = `
 				{{else if ne .SimpleContent.Extension.Base ""}}
 					{{template "SimpleContent" .SimpleContent}}
 				{{else}}
-					{{template "Elements" .Sequence}}
-					{{template "Any" .Any}}
-					{{template "Elements" .Choice}}
-					{{template "Elements" .SequenceChoice}}
-					{{template "Elements" .All}}
+					{{template "Elements" wrapElement .Sequence $typeName}}
+					{{template "Any" .Any }}
+					{{template "Elements" wrapElement .Choice $typeName}}
+					{{template "Elements" wrapElement .SequenceChoice $typeName}}
+					{{template "Elements" wrapElement .All $typeName}}
 					{{template "Attributes" .Attributes}}
 				{{end}}
 			}
+			{{template "ComplexTypeInline" wrapElement .Sequence $typeName}}
+			{{template "ComplexTypeInline" wrapElement .Choice $typeName}}
+			{{template "ComplexTypeInline" wrapElement .SequenceChoice $typeName}}
+			{{template "ComplexTypeInline" wrapElement .All $typeName}}
+
 		{{end}}
 	{{end}}
 {{end}}
