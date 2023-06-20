@@ -530,7 +530,7 @@ func removeNS(xsdType string) string {
 	return r[0]
 }
 
-func toGoType(xsdType string, nillable bool) string {
+func toGoType(xsdType string, nillable bool, minOccurs string) string {
 	// Handles name space, ie. xsd:string, xs:string
 	r := strings.Split(xsdType, ":")
 
@@ -542,14 +542,15 @@ func toGoType(xsdType string, nillable bool) string {
 
 	value := xsd2GoTypes[strings.ToLower(t)]
 
-	if value != "" {
-		if nillable {
-			value = "*" + value
-		}
-		return value
+	if value == "" {
+		value = replaceReservedWords(makePublic(t))
 	}
 
-	return "*" + replaceReservedWords(makePublic(t))
+	if nillable || minOccurs == "0" {
+		value = "*" + value
+	}
+	return value
+
 }
 
 func removePointerFromType(goType string) string {
