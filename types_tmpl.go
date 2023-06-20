@@ -82,7 +82,7 @@ var typesTmpl = `
 	{{range .}}
 		{{if ne .Ref ""}}
 	        {{ $prefix := getNSPrefix .Ref }}
-			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable }} ` + "`" + `xml:"{{getNSFromMap $prefix}} {{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
+			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable }} ` + "`" + `xml:"{{getNSFromMap $prefix}}{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
 		{{if not .Type}}
 			{{if .SimpleType}}
@@ -152,7 +152,7 @@ var typesTmpl = `
 				{{else}}
 					type {{$typeName}} interface{}
 				{{end}}
-			
+
 				{{if .Restriction.Enumeration}}
 				const (
 					{{with .Restriction}}
