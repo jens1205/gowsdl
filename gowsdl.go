@@ -37,6 +37,7 @@ type GoWSDL struct {
 	resolvedXSDExternals  map[string]bool
 	currentRecursionLevel uint8
 	currentNamespace      string
+	currentNamespaceMap   map[string]string
 }
 
 // Method setNS sets (and returns) the currently active XML namespace.
@@ -48,6 +49,19 @@ func (g *GoWSDL) setNS(ns string) string {
 // Method setNS returns the currently active XML namespace.
 func (g *GoWSDL) getNS() string {
 	return g.currentNamespace
+}
+
+func (g *GoWSDL) setNSMap(nsMap map[string]string) map[string]string {
+	g.currentNamespaceMap = nsMap
+	return nsMap
+}
+
+func (g *GoWSDL) getNSMap() map[string]string {
+	return g.currentNamespaceMap
+}
+
+func (g *GoWSDL) getNSFromMap(prefix string) string {
+	return g.currentNamespaceMap[prefix]
 }
 
 var cacheDir = filepath.Join(os.TempDir(), "gowsdl-cache")
@@ -297,11 +311,14 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 		"makeFieldPublic":          makePublic,
 		"comment":                  comment,
 		"removeNS":                 removeNS,
+		"getNSPrefix":              getNSPrefix,
 		"goString":                 goString,
 		"findNameByType":           g.findNameByType,
 		"removePointerFromType":    removePointerFromType,
 		"setNS":                    g.setNS,
 		"getNS":                    g.getNS,
+		"setNSMap":                 g.setNSMap,
+		"getNSFromMap":             g.getNSFromMap,
 		"wrapElement":              wrapElement,
 	}
 
@@ -528,6 +545,15 @@ var xsd2GoTypes = map[string]string{
 	"anytype":            "AnyType",
 	"ncname":             "NCName",
 	"anyuri":             "AnyURI",
+}
+
+func getNSPrefix(xsdType string) string {
+	r := strings.Split(xsdType, ":")
+
+	if len(r) == 2 {
+		return r[0]
+	}
+	return ""
 }
 
 func removeNS(xsdType string) string {
