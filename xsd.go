@@ -209,12 +209,6 @@ Loop:
 				if err := ct.unmarshalSequence(d, t); err != nil {
 					return err
 				}
-			// case "import":
-			// 	x := new(XSDImport)
-			// 	if err := d.DecodeElement(x, &t); err != nil {
-			// 		return err
-			// 	}
-			// 	s.Imports = append(s.Imports, x)
 			default:
 				d.Skip()
 				continue Loop
