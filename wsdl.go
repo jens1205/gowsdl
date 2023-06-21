@@ -124,6 +124,25 @@ type WSDLType struct {
 	Schemas []*XSDSchema `xml:"schema"`
 }
 
+func (w *WSDLType) FilterNamespace(ns string) WSDLType {
+	if ns == "" {
+		return *w
+	}
+
+	var schemas []*XSDSchema
+
+	for _, schema := range schemas {
+		if schema.TargetNamespace == ns {
+			schemas = append(schemas, schema)
+		}
+	}
+
+	return WSDLType{
+		Doc:     w.Doc,
+		Schemas: schemas,
+	}
+}
+
 // WSDLPart defines the struct for a function parameter within a WSDL.
 type WSDLPart struct {
 	Name    string `xml:"name,attr"`

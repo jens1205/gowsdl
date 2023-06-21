@@ -48,9 +48,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"go/format"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -70,11 +72,13 @@ var outFile = flag.String("o", "myservice.go", "File where the generated code wi
 var dir = flag.String("d", "./", "Directory under which package directory will be created")
 var insecure = flag.Bool("i", false, "Skips TLS Verification")
 var makePublic = flag.Bool("make-public", true, "Make the generated types public/exported")
+var nsToPkg gen.NamespaceMapping = make(map[string]string)
 
 func init() {
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
 	log.SetPrefix("🍀  ")
+	flag.Var(&nsToPkg, "pkg", "Namespace to package mapping. Format: pkg=ns")
 }
 
 func main() {
@@ -103,19 +107,28 @@ func main() {
 	}
 
 	// load wsdl
-	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, *insecure, *makePublic)
+	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, nsToPkg, *insecure, *makePublic)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	// generate code
-	gocode, err := gowsdl.Start()
+	generationResult, err := gowsdl.Start()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	pkg := filepath.Join(*dir, *pkg)
 	err = os.Mkdir(pkg, 0744)
+	if !errors.Is(err, fs.ErrExist) {
+		log.Fatalln(err)
+	}
+	for _, subPkg := range nsToPkg.GetPackages() {
+		err = os.Mkdir(filepath.Join(pkg, subPkg), 0744)
+		if !errors.Is(err, fs.ErrExist) {
+			log.Fatalln(err)
+		}
+	}
 
 	file, err := os.Create(filepath.Join(pkg, *outFile))
 	if err != nil {
@@ -124,10 +137,10 @@ func main() {
 	defer file.Close()
 
 	data := new(bytes.Buffer)
-	data.Write(gocode["header"])
-	data.Write(gocode["types"])
-	data.Write(gocode["operations"])
-	data.Write(gocode["soap"])
+	data.Write(generationResult.Header[""])
+	data.Write(generationResult.Types[""])
+	data.Write(generationResult.Operations)
+	// data.Write(generationResult["soap"])
 
 	// go fmt the generated code
 	source, err := format.Source(data.Bytes())
@@ -146,9 +159,9 @@ func main() {
 	defer serverFile.Close()
 
 	serverData := new(bytes.Buffer)
-	serverData.Write(gocode["server_header"])
-	serverData.Write(gocode["server_wsdl"])
-	serverData.Write(gocode["server"])
+	serverData.Write(generationResult.ServerHeader)
+	serverData.Write(generationResult.ServerWSDL)
+	serverData.Write(generationResult.Server)
 
 	serverSource, err := format.Source(serverData.Bytes())
 	if err != nil {

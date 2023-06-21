@@ -88,7 +88,10 @@ var typesTmpl = `
 	{{range .Elements}}
 		{{if ne .Ref ""}}
 	        {{ $prefix := getNSPrefix .Ref }}
-			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable .MinOccurs }} ` + "`" + `xml:"{{getNSFromMap $prefix}}{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
+	        {{ $namespace := getNSFromMap $prefix}}
+	        {{ $pkg := getNSPackage $namespace }}
+	        // will be in package {{$pkg}}
+			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable .MinOccurs }} ` + "`" + `xml:"{{getNSFromMap $prefix | addBlank}}{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
 		{{if not .Type}}
 			{{if .SimpleType}}
@@ -212,7 +215,6 @@ var typesTmpl = `
 		{{if and (eq (len .SimpleContent.Extension.Attributes) 0) (eq (toGoType .SimpleContent.Extension.Base false "") "string") }}
 			type {{$typeName}} string
 		{{else}}
-	        // in main template - ComplexTypes
 			type {{$typeName}} struct {
 				{{$type := findNameByType .Name}}
 				{{if ne .Name $type}}

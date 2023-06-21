@@ -26,6 +26,38 @@ import (
 
 const maxRecursion uint8 = 20
 
+type NamespaceMapping map[string]string
+
+func (i *NamespaceMapping) String() string {
+	var s strings.Builder
+
+	for k, v := range *i {
+		s.WriteString(k)
+		s.WriteString("=")
+		s.WriteString(v)
+		s.WriteString("\n")
+	}
+
+	return s.String()
+}
+
+func (i *NamespaceMapping) Set(value string) error {
+	parts := strings.Split(value, "=")
+	if len(parts) != 2 {
+		return fmt.Errorf("expected format pkg=ns")
+	}
+	(*i)[parts[1]] = parts[0]
+	return nil
+}
+
+func (i *NamespaceMapping) GetPackages() []string {
+	var result []string
+	for _, v := range *i {
+		result = append(result, v)
+	}
+	return result
+}
+
 // GoWSDL defines the struct for WSDL generator.
 type GoWSDL struct {
 	loc                   *Location
@@ -38,6 +70,7 @@ type GoWSDL struct {
 	currentRecursionLevel uint8
 	currentNamespace      string
 	currentNamespaceMap   map[string]string
+	nsToPkg               NamespaceMapping
 }
 
 // Method setNS sets (and returns) the currently active XML namespace.
@@ -58,7 +91,14 @@ func (g *GoWSDL) setNSMap(nsMap map[string]string) map[string]string {
 
 func (g *GoWSDL) getNSFromMap(prefix string) string {
 	if result, ok := g.currentNamespaceMap[prefix]; ok {
-		return result + " "
+		return result
+	}
+	return ""
+}
+
+func (g *GoWSDL) getNSPackage(ns string) string {
+	if result, ok := g.nsToPkg[ns]; ok {
+		return result
 	}
 	return ""
 }
@@ -107,7 +147,7 @@ func downloadFile(url string, ignoreTLS bool) ([]byte, error) {
 }
 
 // NewGoWSDL initializes WSDL generator.
-func NewGoWSDL(file, pkg string, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, error) {
+func NewGoWSDL(file, pkg string, pkgToNs NamespaceMapping, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, error) {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return nil, errors.New("WSDL file is required to generate Go proxy")
@@ -132,13 +172,32 @@ func NewGoWSDL(file, pkg string, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, 
 		pkg:          pkg,
 		ignoreTLS:    ignoreTLS,
 		makePublicFn: makePublicFn,
+		nsToPkg:      pkgToNs,
 	}, nil
+}
+
+type GenerationResult struct {
+	// Types is a map from package to generated code
+	// If no subpackages are used, the key is ""
+	Types        map[string][]byte
+	Header       map[string][]byte
+	Operations   []byte
+	Server       []byte
+	ServerHeader []byte
+	ServerWSDL   []byte
+}
+
+func NewGenerationResult() *GenerationResult {
+	return &GenerationResult{
+		Types:  make(map[string][]byte),
+		Header: make(map[string][]byte),
+	}
 }
 
 // Start initiaties the code generation process by starting two goroutines: one
 // to generate types and another one to generate operations.
-func (g *GoWSDL) Start() (map[string][]byte, error) {
-	gocode := make(map[string][]byte)
+func (g *GoWSDL) Start() (*GenerationResult, error) {
+	result := NewGenerationResult()
 
 	err := g.unmarshal()
 	if err != nil {
@@ -157,9 +216,19 @@ func (g *GoWSDL) Start() (map[string][]byte, error) {
 		defer wg.Done()
 		var err error
 
-		gocode["types"], err = g.genTypes()
-		if err != nil {
-			log.Println("genTypes", "error", err)
+		if len(g.nsToPkg) == 0 {
+			result.Types[""], err = g.genTypes("")
+			if err != nil {
+				log.Println("genTypes", "error", err)
+			}
+		} else {
+			for ns, pkg := range g.nsToPkg {
+				result.Types[pkg], err = g.genTypes(ns)
+				if err != nil {
+					log.Println("genTypes", "error", err)
+				}
+			}
+
 		}
 	}()
 
@@ -168,7 +237,7 @@ func (g *GoWSDL) Start() (map[string][]byte, error) {
 		defer wg.Done()
 		var err error
 
-		gocode["operations"], err = g.genOperations()
+		result.Operations, err = g.genOperations()
 		if err != nil {
 			log.Println(err)
 		}
@@ -179,7 +248,7 @@ func (g *GoWSDL) Start() (map[string][]byte, error) {
 		defer wg.Done()
 		var err error
 
-		gocode["server"], err = g.genServer()
+		result.Server, err = g.genServer()
 		if err != nil {
 			log.Println(err)
 		}
@@ -187,19 +256,28 @@ func (g *GoWSDL) Start() (map[string][]byte, error) {
 
 	wg.Wait()
 
-	gocode["header"], err = g.genHeader()
+	if len(g.nsToPkg) == 0 {
+		result.Header[""], err = g.genHeader("")
+		if err != nil {
+			log.Println(err)
+		}
+	} else {
+		for ns, pkg := range g.nsToPkg {
+			result.Header[pkg], err = g.genHeader(ns)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
+
+	result.ServerHeader, err = g.genServerHeader()
 	if err != nil {
 		log.Println(err)
 	}
 
-	gocode["server_header"], err = g.genServerHeader()
-	if err != nil {
-		log.Println(err)
-	}
+	result.ServerWSDL = []byte("var wsdl = `" + string(g.rawWSDL) + "`")
 
-	gocode["server_wsdl"] = []byte("var wsdl = `" + string(g.rawWSDL) + "`")
-
-	return gocode, nil
+	return result, nil
 }
 
 func (g *GoWSDL) fetchFile(loc *Location) (data []byte, err error) {
@@ -227,6 +305,10 @@ func (g *GoWSDL) unmarshal() error {
 	g.rawWSDL = data
 
 	for _, schema := range g.wsdl.Types.Schemas {
+		log.Println("Resolving XSD externals", "schema", schema.TargetNamespace)
+		if g.getNSPackage(schema.TargetNamespace) == "" {
+			return fmt.Errorf("no package mapping for namespace %s", schema.TargetNamespace)
+		}
 		err = g.resolveXSDExternals(schema, g.loc)
 		if err != nil {
 			return err
@@ -273,6 +355,10 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 			}
 		}
 
+		log.Println("Adding schema for", newschema.TargetNamespace)
+		if g.getNSPackage(newschema.TargetNamespace) == "" {
+			return fmt.Errorf("no package mapping for namespace %s", newschema.TargetNamespace)
+		}
 		g.wsdl.Types.Schemas = append(g.wsdl.Types.Schemas, newschema)
 
 		return nil
@@ -299,10 +385,11 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 	return nil
 }
 
-func (g *GoWSDL) genTypes() ([]byte, error) {
+func (g *GoWSDL) genTypes(ns string) ([]byte, error) {
 	funcMap := template.FuncMap{
 		"toGoType":                 toGoType,
 		"stripns":                  stripns,
+		"addBlank":                 addBlank,
 		"replaceReservedWords":     replaceReservedWords,
 		"replaceAttrReservedWords": replaceAttrReservedWords,
 		"normalize":                normalize,
@@ -319,11 +406,12 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 		"setNSMap":                 g.setNSMap,
 		"getNSFromMap":             g.getNSFromMap,
 		"wrapElement":              wrapElement,
+		"getNSPackage":             g.getNSPackage,
 	}
 
 	data := new(bytes.Buffer)
 	tmpl := template.Must(template.New("types").Funcs(funcMap).Parse(typesTmpl))
-	err := tmpl.Execute(data, g.wsdl.Types)
+	err := tmpl.Execute(data, g.wsdl.Types.FilterNamespace(ns))
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +463,7 @@ func (g *GoWSDL) genServer() ([]byte, error) {
 	return data.Bytes(), nil
 }
 
-func (g *GoWSDL) genHeader() ([]byte, error) {
+func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 	funcMap := template.FuncMap{
 		"toGoType":             toGoType,
 		"stripns":              stripns,
@@ -679,6 +767,14 @@ func stripns(xsdType string) string {
 	}
 
 	return t
+}
+
+func addBlank(s string) string {
+	if s == "" {
+		return ""
+	} else {
+		return s + " "
+	}
 }
 
 func makePublic(identifier string) string {

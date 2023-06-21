@@ -225,6 +225,18 @@ Loop:
 					return err
 				}
 				ct.All = append(ct.All, x.Elements...)
+			case "complexContent":
+				x := new(XSDComplexContent)
+				if err := d.DecodeElement(x, &t); err != nil {
+					return err
+				}
+				ct.ComplexContent = *x
+			case "simpleContent":
+				x := new(XSDSimpleContent)
+				if err := d.DecodeElement(x, &t); err != nil {
+					return err
+				}
+				ct.SimpleContent = *x
 
 			default:
 				d.Skip()
