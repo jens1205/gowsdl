@@ -164,10 +164,14 @@ type XSDComplexType struct {
 
 type XSDChoiceType struct {
 	XMLName   xml.Name      `xml:"choice"`
-	Abstract  bool          `xml:"abstract,attr"`
 	Name      string        `xml:"name,attr"`
 	MinOccurs string        `xml:"minOccurs,attr"`
 	Elements  []*XSDElement `xml:"element"`
+}
+
+type XSDAllType struct {
+	XMLName  xml.Name      `xml:"all"`
+	Elements []*XSDElement `xml:"element"`
 }
 
 func (ct *XSDComplexType) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
@@ -209,6 +213,19 @@ Loop:
 				if err := ct.unmarshalSequence(d, t); err != nil {
 					return err
 				}
+			case "choice":
+				choiceElements, err := ct.unmarshalChoice(d, t)
+				if err != nil {
+					return err
+				}
+				ct.Choice = append(ct.Choice, choiceElements...)
+			case "all":
+				x := new(XSDAllType)
+				if err := d.DecodeElement(x, &start); err != nil {
+					return err
+				}
+				ct.All = append(ct.All, x.Elements...)
+
 			default:
 				d.Skip()
 				continue Loop
@@ -243,16 +260,22 @@ Loop:
 				}
 				ct.Sequence = append(ct.Sequence, x)
 			case "choice":
-				x := new(XSDChoiceType)
+				choiceElements, err := ct.unmarshalChoice(d, t)
+				if err != nil {
+					return err
+				}
+				ct.Sequence = append(ct.Sequence, choiceElements...)
+
+			case "any":
+				// this logic preserves the old logic of gowsdl although I guess it is as wrong as the
+				// old logic for "SequenceChoice", i.e. the ordering of elements is not preserved this way
+				// To fix this, we would need to change the type of ct.Sequence to []interface{} (or some marker interface)
+				// But this would lead to changes in the template which is consuming all this types
+				x := new(XSDAny)
 				if err := d.DecodeElement(x, &t); err != nil {
 					return err
 				}
-				if x.MinOccurs != "" {
-					for i := range x.Elements {
-						x.Elements[i].MinOccurs = x.MinOccurs
-					}
-				}
-				ct.Sequence = append(ct.Sequence, x.Elements...)
+				ct.Any = append(ct.Any, x)
 			default:
 				d.Skip()
 				continue Loop
@@ -262,6 +285,19 @@ Loop:
 		}
 	}
 	return nil
+}
+
+func (ct *XSDComplexType) unmarshalChoice(d *xml.Decoder, start xml.StartElement) ([]*XSDElement, error) {
+	x := new(XSDChoiceType)
+	if err := d.DecodeElement(x, &start); err != nil {
+		return nil, err
+	}
+	if x.MinOccurs != "" {
+		for i := range x.Elements {
+			x.Elements[i].MinOccurs = x.MinOccurs
+		}
+	}
+	return x.Elements, nil
 }
 
 // XSDGroup element is used to define a group of elements to be used in complex type definitions.
