@@ -39,7 +39,6 @@ var typesTmpl = `
 
 	{{template "Elements" wrapElement .Extension.Sequence ""}}
 	{{template "Elements" wrapElement .Extension.Choice ""}}
-	{{template "Elements" wrapElement .Extension.SequenceChoice ""}}
 	{{template "Attributes" .Extension.Attributes}}
 {{end}}
 
@@ -75,7 +74,6 @@ var typesTmpl = `
 	    	{{else}}
 	    		{{template "Elements" wrapElement .Sequence $name}}
 	    		{{template "Elements" wrapElement .Choice $name}}
-	    		{{template "Elements" wrapElement .SequenceChoice $name}}
 	    		{{template "Elements" wrapElement .All $name}}
 	    	{{end}}
 	    }
@@ -142,14 +140,12 @@ var typesTmpl = `
 						{{template "Elements" wrapElement .Sequence $name}}
 						{{template "Any" .Any }}
 						{{template "Elements" wrapElement .Choice $name}}
-						{{template "Elements" wrapElement .SequenceChoice $name}}
 						{{template "Elements" wrapElement .All $name}}
 						{{template "Attributes" .Attributes}}
 					{{end}}
 				}
 			    {{template "ComplexTypeInline" wrapElement .Sequence $name}}
 			    {{template "ComplexTypeInline" wrapElement .Choice $name}}
-			    {{template "ComplexTypeInline" wrapElement .SequenceChoice $name}}
 			    {{template "ComplexTypeInline" wrapElement .All $name}}
 			{{end}}
 			{{/* SimpleTypeLocal */}}
@@ -231,14 +227,12 @@ var typesTmpl = `
 					{{template "Elements" wrapElement .Sequence $typeName}}
 					{{template "Any" .Any }}
 					{{template "Elements" wrapElement .Choice $typeName}}
-					{{template "Elements" wrapElement .SequenceChoice $typeName}}
 					{{template "Elements" wrapElement .All $typeName}}
 					{{template "Attributes" .Attributes}}
 				{{end}}
 			}
 			{{template "ComplexTypeInline" wrapElement .Sequence $typeName}}
 			{{template "ComplexTypeInline" wrapElement .Choice $typeName}}
-			{{template "ComplexTypeInline" wrapElement .SequenceChoice $typeName}}
 			{{template "ComplexTypeInline" wrapElement .All $typeName}}
 
 		{{end}}

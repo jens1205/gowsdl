@@ -129,7 +129,6 @@ func (t *traverser) traverseSimpleType(st *XSDSimpleType) {
 func (t *traverser) traverseComplexType(ct *XSDComplexType) {
 	t.traverseElements(ct.Sequence)
 	t.traverseElements(ct.Choice)
-	t.traverseElements(ct.SequenceChoice)
 	t.traverseElements(ct.All)
 	t.traverseAttributes(ct.Attributes)
 	t.traverseAttributes(ct.ComplexContent.Extension.Attributes)

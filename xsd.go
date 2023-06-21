@@ -155,12 +155,119 @@ type XSDComplexType struct {
 	Mixed          bool              `xml:"mixed,attr"`
 	Sequence       []*XSDElement     `xml:"sequence>element"`
 	Choice         []*XSDElement     `xml:"choice>element"`
-	SequenceChoice []*XSDElement     `xml:"sequence>choice>element"`
 	All            []*XSDElement     `xml:"all>element"`
 	ComplexContent XSDComplexContent `xml:"complexContent"`
 	SimpleContent  XSDSimpleContent  `xml:"simpleContent"`
 	Attributes     []*XSDAttribute   `xml:"attribute"`
 	Any            []*XSDAny         `xml:"sequence>any"`
+}
+
+type XSDChoiceType struct {
+	XMLName   xml.Name      `xml:"choice"`
+	Abstract  bool          `xml:"abstract,attr"`
+	Name      string        `xml:"name,attr"`
+	MinOccurs string        `xml:"minOccurs,attr"`
+	Elements  []*XSDElement `xml:"element"`
+}
+
+func (ct *XSDComplexType) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	ct.XMLName = start.Name
+	for _, attr := range start.Attr {
+
+		switch attr.Name.Local {
+		case "mixed":
+			ct.Mixed = attr.Value == "true"
+		case "name":
+			ct.Name = attr.Value
+		case "abstract":
+			ct.Abstract = attr.Value == "true"
+		}
+	}
+
+Loop:
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return err
+		}
+
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != xmlschema11 {
+				d.Skip()
+				continue Loop
+			}
+
+			switch t.Name.Local {
+			case "attribute":
+				x := new(XSDAttribute)
+				if err := d.DecodeElement(x, &t); err != nil {
+					return err
+				}
+				ct.Attributes = append(ct.Attributes, x)
+			case "sequence":
+				if err := ct.unmarshalSequence(d, t); err != nil {
+					return err
+				}
+			// case "import":
+			// 	x := new(XSDImport)
+			// 	if err := d.DecodeElement(x, &t); err != nil {
+			// 		return err
+			// 	}
+			// 	s.Imports = append(s.Imports, x)
+			default:
+				d.Skip()
+				continue Loop
+			}
+		case xml.EndElement:
+			break Loop
+		}
+	}
+	return nil
+}
+
+func (ct *XSDComplexType) unmarshalSequence(d *xml.Decoder, start xml.StartElement) error {
+Loop:
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return err
+		}
+
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != xmlschema11 {
+				d.Skip()
+				continue Loop
+			}
+
+			switch t.Name.Local {
+			case "element":
+				x := new(XSDElement)
+				if err := d.DecodeElement(x, &t); err != nil {
+					return err
+				}
+				ct.Sequence = append(ct.Sequence, x)
+			case "choice":
+				x := new(XSDChoiceType)
+				if err := d.DecodeElement(x, &t); err != nil {
+					return err
+				}
+				if x.MinOccurs != "" {
+					for i := range x.Elements {
+						x.Elements[i].MinOccurs = x.MinOccurs
+					}
+				}
+				ct.Sequence = append(ct.Sequence, x.Elements...)
+			default:
+				d.Skip()
+				continue Loop
+			}
+		case xml.EndElement:
+			break Loop
+		}
+	}
+	return nil
 }
 
 // XSDGroup element is used to define a group of elements to be used in complex type definitions.
