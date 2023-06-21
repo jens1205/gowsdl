@@ -88,9 +88,6 @@ var typesTmpl = `
 	{{range .Elements}}
 		{{if ne .Ref ""}}
 	        {{ $prefix := getNSPrefix .Ref }}
-	        {{ $namespace := getNSFromMap $prefix}}
-	        {{ $pkg := getNSPackage $namespace }}
-	        // will be in package {{$pkg}}
 			{{removeNS .Ref | replaceReservedWords  | makePublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Ref .Nillable .MinOccurs }} ` + "`" + `xml:"{{getNSFromMap $prefix | addBlank}}{{.Ref | removeNS}},omitempty" json:"{{.Ref | removeNS}},omitempty"` + "`" + `
 		{{else}}
 		{{if not .Type}}

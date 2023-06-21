@@ -4,7 +4,9 @@
 
 package gowsdl
 
-import "encoding/xml"
+import (
+	"encoding/xml"
+)
 
 const wsdlNamespace = "http://schemas.xmlsoap.org/wsdl/"
 
@@ -131,7 +133,7 @@ func (w *WSDLType) FilterNamespace(ns string) WSDLType {
 
 	var schemas []*XSDSchema
 
-	for _, schema := range schemas {
+	for _, schema := range w.Schemas {
 		if schema.TargetNamespace == ns {
 			schemas = append(schemas, schema)
 		}

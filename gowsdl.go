@@ -71,6 +71,7 @@ type GoWSDL struct {
 	currentNamespace      string
 	currentNamespaceMap   map[string]string
 	nsToPkg               NamespaceMapping
+	pkgBaseURL            string
 }
 
 // Method setNS sets (and returns) the currently active XML namespace.
@@ -147,7 +148,7 @@ func downloadFile(url string, ignoreTLS bool) ([]byte, error) {
 }
 
 // NewGoWSDL initializes WSDL generator.
-func NewGoWSDL(file, pkg string, pkgToNs NamespaceMapping, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, error) {
+func NewGoWSDL(file, pkg string, nsToPkg NamespaceMapping, pkgBaseURL string, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, error) {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return nil, errors.New("WSDL file is required to generate Go proxy")
@@ -172,7 +173,8 @@ func NewGoWSDL(file, pkg string, pkgToNs NamespaceMapping, ignoreTLS bool, expor
 		pkg:          pkg,
 		ignoreTLS:    ignoreTLS,
 		makePublicFn: makePublicFn,
-		nsToPkg:      pkgToNs,
+		nsToPkg:      nsToPkg,
+		pkgBaseURL:   pkgBaseURL,
 	}, nil
 }
 
@@ -304,29 +306,40 @@ func (g *GoWSDL) unmarshal() error {
 	}
 	g.rawWSDL = data
 
+	var newSchemas []*XSDSchema
+	log.Println("Schemas before resolving XSD externals", "count", len(g.wsdl.Types.Schemas))
+	for _, schema := range g.wsdl.Types.Schemas {
+		log.Println("Contains", "schema", schema.TargetNamespace)
+	}
 	for _, schema := range g.wsdl.Types.Schemas {
 		log.Println("Resolving XSD externals", "schema", schema.TargetNamespace)
 		if g.getNSPackage(schema.TargetNamespace) == "" {
 			return fmt.Errorf("no package mapping for namespace %s", schema.TargetNamespace)
 		}
-		err = g.resolveXSDExternals(schema, g.loc)
+		schemas, err := g.resolveXSDExternals(schema, g.loc)
 		if err != nil {
 			return err
 		}
+		newSchemas = append(newSchemas, schemas...)
+	}
+	g.wsdl.Types.Schemas = append(g.wsdl.Types.Schemas, newSchemas...)
+	log.Println("Schemas after resolving XSD externals", "count", len(g.wsdl.Types.Schemas))
+	for _, schema := range g.wsdl.Types.Schemas {
+		log.Println("Contains", "schema", schema.TargetNamespace)
 	}
 
 	return nil
 }
 
-func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
-	download := func(base *Location, ref string) error {
+func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) ([]*XSDSchema, error) {
+	download := func(base *Location, ref string) ([]*XSDSchema, error) {
 		location, err := base.Parse(ref)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		schemaKey := location.String()
 		if g.resolvedXSDExternals[location.String()] {
-			return nil
+			return nil, nil
 		}
 		if g.resolvedXSDExternals == nil {
 			g.resolvedXSDExternals = make(map[string]bool, maxRecursion)
@@ -335,34 +348,37 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 
 		var data []byte
 		if data, err = g.fetchFile(location); err != nil {
-			return err
+			return nil, err
 		}
 
+		var downloadResult []*XSDSchema
 		newschema := new(XSDSchema)
 
 		err = xml.Unmarshal(data, newschema)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if (len(newschema.Includes) > 0 || len(newschema.Imports) > 0) &&
 			maxRecursion > g.currentRecursionLevel {
 			g.currentRecursionLevel++
 
-			err = g.resolveXSDExternals(newschema, location)
+			schemas, err := g.resolveXSDExternals(newschema, location)
 			if err != nil {
-				return err
+				return nil, err
 			}
+			downloadResult = append(downloadResult, schemas...)
 		}
 
-		log.Println("Adding schema for", newschema.TargetNamespace)
+		log.Println("Adding external schema for", newschema.TargetNamespace)
 		if g.getNSPackage(newschema.TargetNamespace) == "" {
-			return fmt.Errorf("no package mapping for namespace %s", newschema.TargetNamespace)
+			return nil, fmt.Errorf("no package mapping for namespace %s", newschema.TargetNamespace)
 		}
-		g.wsdl.Types.Schemas = append(g.wsdl.Types.Schemas, newschema)
 
-		return nil
+		return append(downloadResult, newschema), nil
 	}
+
+	var result []*XSDSchema
 
 	for _, impts := range schema.Imports {
 		// Download the file only if we have a hint in the form of schemaLocation.
@@ -371,23 +387,31 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 			continue
 		}
 
-		if e := download(loc, impts.SchemaLocation); e != nil {
-			return e
+		newSchemas, err := download(loc, impts.SchemaLocation)
+		if err != nil {
+			return nil, err
+		}
+		if newSchemas != nil {
+			result = append(result, newSchemas...)
 		}
 	}
 
 	for _, incl := range schema.Includes {
-		if e := download(loc, incl.SchemaLocation); e != nil {
-			return e
+		newSchemas, err := download(loc, incl.SchemaLocation)
+		if err != nil {
+			return nil, err
+		}
+		if newSchemas != nil {
+			result = append(result, newSchemas...)
 		}
 	}
 
-	return nil
+	return result, nil
 }
 
 func (g *GoWSDL) genTypes(ns string) ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":                 toGoType,
+		"toGoType":                 g.toGoType,
 		"stripns":                  stripns,
 		"addBlank":                 addBlank,
 		"replaceReservedWords":     replaceReservedWords,
@@ -421,7 +445,7 @@ func (g *GoWSDL) genTypes(ns string) ([]byte, error) {
 
 func (g *GoWSDL) genOperations() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"normalize":            normalize,
@@ -444,7 +468,7 @@ func (g *GoWSDL) genOperations() ([]byte, error) {
 
 func (g *GoWSDL) genServer() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"makePublic":           g.makePublicFn,
@@ -465,7 +489,7 @@ func (g *GoWSDL) genServer() ([]byte, error) {
 
 func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"normalize":            normalize,
@@ -476,7 +500,34 @@ func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 
 	data := new(bytes.Buffer)
 	tmpl := template.Must(template.New("header").Funcs(funcMap).Parse(headerTmpl))
-	err := tmpl.Execute(data, g.pkg)
+
+	var imports []string
+	var pkg string
+	if ns != "" {
+		schema := g.wsdl.Types.FilterNamespace(ns).Schemas[0]
+		for _, namespace := range schema.Xmlns {
+			if namespace == schema.TargetNamespace {
+				continue
+			}
+			if pkg := g.getNSPackage(namespace); pkg != "" {
+				imports = append(imports, pkg)
+			}
+
+		}
+		pkg = g.getNSPackage(ns)
+	} else {
+		pkg = g.pkg
+	}
+
+	err := tmpl.Execute(data, struct {
+		Pkg     string
+		BaseURL string
+		Imports []string
+	}{
+		Pkg:     pkg,
+		BaseURL: g.pkgBaseURL,
+		Imports: imports,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +537,7 @@ func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 
 func (g *GoWSDL) genServerHeader() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"makePublic":           g.makePublicFn,
@@ -654,20 +705,28 @@ func removeNS(xsdType string) string {
 	return r[0]
 }
 
-func toGoType(xsdType string, nillable bool, minOccurs string) string {
+func (g *GoWSDL) toGoType(xsdType string, nillable bool, minOccurs string) string {
 	// Handles name space, ie. xsd:string, xs:string
 	r := strings.Split(xsdType, ":")
 
-	t := r[0]
+	gotype := r[0]
 
 	if len(r) == 2 {
-		t = r[1]
+		gotype = r[1]
 	}
 
-	value := xsd2GoTypes[strings.ToLower(t)]
+	value := xsd2GoTypes[strings.ToLower(gotype)]
 
 	if value == "" {
-		value = replaceReservedWords(makePublic(t))
+		value = replaceReservedWords(makePublic(gotype))
+		if len(r) == 2 {
+			ns := g.getNSFromMap(r[0])
+			if ns != g.getNS() {
+				pkg := g.getNSPackage(ns)
+				value = fmt.Sprintf("%s.%s", pkg, value)
+			}
+		}
+
 	}
 
 	if nillable || minOccurs == "0" {

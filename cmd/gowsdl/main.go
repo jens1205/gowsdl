@@ -68,6 +68,7 @@ var Name string
 
 var vers = flag.Bool("v", false, "Shows gowsdl version")
 var pkg = flag.String("p", "myservice", "Package under which code will be generated")
+var pkgBaseUrl = flag.String("pkgBaseUrl", "", "Base URL for the generated package")
 var outFile = flag.String("o", "myservice.go", "File where the generated code will be saved")
 var dir = flag.String("d", "./", "Directory under which package directory will be created")
 var insecure = flag.Bool("i", false, "Skips TLS Verification")
@@ -89,6 +90,10 @@ func main() {
 
 	flag.Parse()
 
+	if len(nsToPkg) > 0 && *pkgBaseUrl == "" {
+		log.Fatalln("pkgBaseUrl is required when using pkg")
+	}
+
 	// Show app version
 	if *vers {
 		log.Println(Version)
@@ -107,7 +112,7 @@ func main() {
 	}
 
 	// load wsdl
-	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, nsToPkg, *insecure, *makePublic)
+	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, nsToPkg, *pkgBaseUrl, *insecure, *makePublic)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -118,19 +123,19 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	pkg := filepath.Join(*dir, *pkg)
-	err = os.Mkdir(pkg, 0744)
+	pkgPath := filepath.Join(*dir, *pkg)
+	err = os.Mkdir(pkgPath, 0744)
 	if !errors.Is(err, fs.ErrExist) {
 		log.Fatalln(err)
 	}
 	for _, subPkg := range nsToPkg.GetPackages() {
-		err = os.Mkdir(filepath.Join(pkg, subPkg), 0744)
+		err = os.Mkdir(filepath.Join(pkgPath, subPkg), 0744)
 		if !errors.Is(err, fs.ErrExist) {
 			log.Fatalln(err)
 		}
 	}
 
-	file, err := os.Create(filepath.Join(pkg, *outFile))
+	file, err := os.Create(filepath.Join(pkgPath, *outFile))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -140,19 +145,42 @@ func main() {
 	data.Write(generationResult.Header[""])
 	data.Write(generationResult.Types[""])
 	data.Write(generationResult.Operations)
-	// data.Write(generationResult["soap"])
 
 	// go fmt the generated code
 	source, err := format.Source(data.Bytes())
 	if err != nil {
-		file.Write(data.Bytes())
+		_, _ = file.Write(data.Bytes())
 		log.Fatalln(err)
 	}
 
-	file.Write(source)
+	_, _ = file.Write(source)
+
+	// all types in subpackages
+	for _, subPkg := range nsToPkg.GetPackages() {
+		log.Println("subPkg", subPkg)
+		log.Println("pkg", pkgPath)
+		log.Println("Generating", filepath.Join(pkgPath, subPkg, subPkg+".go"))
+		pkgFile, err := os.Create(filepath.Join(pkgPath, subPkg, subPkg+".go"))
+		if err != nil {
+			log.Fatalln(err)
+		}
+		defer pkgFile.Close()
+		data := new(bytes.Buffer)
+		data.Write(generationResult.Header[subPkg])
+		data.Write(generationResult.Types[subPkg])
+
+		// go fmt the generated code
+		source, err := format.Source(data.Bytes())
+		if err != nil {
+			_, _ = pkgFile.Write(data.Bytes())
+			log.Fatalln(err)
+		}
+
+		_, _ = pkgFile.Write(source)
+	}
 
 	// server
-	serverFile, err := os.Create(pkg + "/" + "server" + *outFile)
+	serverFile, err := os.Create(filepath.Join(pkgPath, "server"+*outFile))
 	if err != nil {
 		log.Fatalln(err)
 	}
