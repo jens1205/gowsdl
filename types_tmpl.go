@@ -2,6 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+// ToDo:
+// - the namespacing of Elements using a type in a different namespace is not correct
+// - Top level complex types should always be generated as a struct with an XMLName field WITHOUT a tag
+// - The element using the type like so
+// 			<xsd:element name="executeQueryRequest" type="types:ExecuteQueryRequestType"/>
+//   should be generated as a type alias with an MarshalXML method like so
+//   func (r ExecuteQueryRequest) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+//   	inner := inventoryQueryProviderTypes.ExecuteQueryRequestType(r)
+// 	    inner.XMLName = xml.Name{Local: "executeQueryRequest", Space: "http://services.tdeu.telekom.net/ServAndResMgmt/InventoryMgmt/InventoryQueryProvider_v01.00"}
+// 	    return e.Encode(inner)
+//   }
+
 package gowsdl
 
 var typesTmpl = `
