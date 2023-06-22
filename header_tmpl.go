@@ -10,6 +10,7 @@ var headerTmpl = `
 package {{.Pkg}}
 
 import (
+	"context"
 	"encoding/xml"
 	"time"
 	"github.com/jens1205/gowsdl/soap"
@@ -24,6 +25,7 @@ import (
 var _ time.Time
 var _ xml.Name
 var _ soap.XSDDateTime
+var _ context.Context
 
 type AnyType struct {
 	InnerXML string ` + "`" + `xml:",innerxml"` + "`" + `

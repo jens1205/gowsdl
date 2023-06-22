@@ -22,6 +22,8 @@ import (
 	"text/template"
 	"time"
 	"unicode"
+
+	"golang.org/x/exp/slices"
 )
 
 const maxRecursion uint8 = 20
@@ -72,6 +74,8 @@ type GoWSDL struct {
 	currentNamespaceMap   map[string]string
 	nsToPkg               NamespaceMapping
 	pkgBaseURL            string
+	// imports remembers the imports (pakage names) we need per target namespace
+	imports map[string][]string
 }
 
 // Method setNS sets (and returns) the currently active XML namespace.
@@ -175,6 +179,7 @@ func NewGoWSDL(file, pkg string, nsToPkg NamespaceMapping, pkgBaseURL string, ig
 		makePublicFn: makePublicFn,
 		nsToPkg:      nsToPkg,
 		pkgBaseURL:   pkgBaseURL,
+		imports:      make(map[string][]string),
 	}, nil
 }
 
@@ -230,8 +235,8 @@ func (g *GoWSDL) Start() (*GenerationResult, error) {
 					log.Println("genTypes", "error", err)
 				}
 			}
-
 		}
+		log.Println("genTypes", "done")
 	}()
 
 	wg.Add(1)
@@ -243,6 +248,7 @@ func (g *GoWSDL) Start() (*GenerationResult, error) {
 		if err != nil {
 			log.Println(err)
 		}
+		log.Println("genOperations", "done")
 	}()
 
 	wg.Add(1)
@@ -254,6 +260,7 @@ func (g *GoWSDL) Start() (*GenerationResult, error) {
 		if err != nil {
 			log.Println(err)
 		}
+		log.Println("genServer", "done")
 	}()
 
 	wg.Wait()
@@ -271,13 +278,16 @@ func (g *GoWSDL) Start() (*GenerationResult, error) {
 			}
 		}
 	}
+	log.Println("genHeader", "done")
 
 	result.ServerHeader, err = g.genServerHeader()
 	if err != nil {
 		log.Println(err)
 	}
+	log.Println("genServerHeader", "done")
 
 	result.ServerWSDL = []byte("var wsdl = `" + string(g.rawWSDL) + "`")
+	log.Println("genServerWSDL", "done")
 
 	return result, nil
 }
@@ -307,13 +317,9 @@ func (g *GoWSDL) unmarshal() error {
 	g.rawWSDL = data
 
 	var newSchemas []*XSDSchema
-	log.Println("Schemas before resolving XSD externals", "count", len(g.wsdl.Types.Schemas))
-	for _, schema := range g.wsdl.Types.Schemas {
-		log.Println("Contains", "schema", schema.TargetNamespace)
-	}
 	for _, schema := range g.wsdl.Types.Schemas {
 		log.Println("Resolving XSD externals", "schema", schema.TargetNamespace)
-		if g.getNSPackage(schema.TargetNamespace) == "" {
+		if len(g.nsToPkg) > 0 && g.getNSPackage(schema.TargetNamespace) == "" {
 			return fmt.Errorf("no package mapping for namespace %s", schema.TargetNamespace)
 		}
 		schemas, err := g.resolveXSDExternals(schema, g.loc)
@@ -323,10 +329,6 @@ func (g *GoWSDL) unmarshal() error {
 		newSchemas = append(newSchemas, schemas...)
 	}
 	g.wsdl.Types.Schemas = append(g.wsdl.Types.Schemas, newSchemas...)
-	log.Println("Schemas after resolving XSD externals", "count", len(g.wsdl.Types.Schemas))
-	for _, schema := range g.wsdl.Types.Schemas {
-		log.Println("Contains", "schema", schema.TargetNamespace)
-	}
 
 	return nil
 }
@@ -371,7 +373,7 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) ([]*XSDSc
 		}
 
 		log.Println("Adding external schema for", newschema.TargetNamespace)
-		if g.getNSPackage(newschema.TargetNamespace) == "" {
+		if len(g.nsToPkg) > 0 && g.getNSPackage(newschema.TargetNamespace) == "" {
 			return nil, fmt.Errorf("no package mapping for namespace %s", newschema.TargetNamespace)
 		}
 
@@ -501,19 +503,8 @@ func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 	data := new(bytes.Buffer)
 	tmpl := template.Must(template.New("header").Funcs(funcMap).Parse(headerTmpl))
 
-	var imports []string
 	var pkg string
 	if ns != "" {
-		schema := g.wsdl.Types.FilterNamespace(ns).Schemas[0]
-		for _, namespace := range schema.Xmlns {
-			if namespace == schema.TargetNamespace {
-				continue
-			}
-			if pkg := g.getNSPackage(namespace); pkg != "" {
-				imports = append(imports, pkg)
-			}
-
-		}
 		pkg = g.getNSPackage(ns)
 	} else {
 		pkg = g.pkg
@@ -526,7 +517,7 @@ func (g *GoWSDL) genHeader(ns string) ([]byte, error) {
 	}{
 		Pkg:     pkg,
 		BaseURL: g.pkgBaseURL,
-		Imports: imports,
+		Imports: g.imports[ns],
 	})
 	if err != nil {
 		return nil, err
@@ -720,10 +711,17 @@ func (g *GoWSDL) toGoType(xsdType string, nillable bool, minOccurs string) strin
 	if value == "" {
 		value = replaceReservedWords(makePublic(gotype))
 		if len(r) == 2 {
-			ns := g.getNSFromMap(r[0])
-			if ns != g.getNS() {
-				pkg := g.getNSPackage(ns)
-				value = fmt.Sprintf("%s.%s", pkg, value)
+			if ns := g.getNSFromMap(r[0]); ns != g.currentNamespace {
+				if pkg := g.getNSPackage(ns); pkg != "" {
+					value = fmt.Sprintf("%s.%s", pkg, value)
+					if pkgList, found := g.imports[g.currentNamespace]; found {
+						if !slices.Contains(pkgList, pkg) {
+							g.imports[g.currentNamespace] = append(g.imports[g.currentNamespace], pkg)
+						}
+					} else {
+						g.imports[g.currentNamespace] = []string{pkg}
+					}
+				}
 			}
 		}
 

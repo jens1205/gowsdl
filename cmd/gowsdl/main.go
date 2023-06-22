@@ -82,7 +82,7 @@ func init() {
 	flag.Var(&nsToPkg, "pkg", "Namespace to package mapping. Format: pkg=ns")
 }
 
-func main() {
+func setup() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] myservice.wsdl\n", os.Args[0])
 		flag.PrintDefaults()
@@ -105,36 +105,23 @@ func main() {
 		os.Exit(0)
 	}
 
-	wsdlPath := os.Args[len(os.Args)-1]
+}
 
-	if *outFile == wsdlPath {
-		log.Fatalln("Output file cannot be the same WSDL file")
-	}
-
-	// load wsdl
-	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, nsToPkg, *pkgBaseUrl, *insecure, *makePublic)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	// generate code
-	generationResult, err := gowsdl.Start()
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	pkgPath := filepath.Join(*dir, *pkg)
-	err = os.Mkdir(pkgPath, 0744)
-	if !errors.Is(err, fs.ErrExist) {
+func createDirs(pkgPath string) {
+	err := os.Mkdir(pkgPath, 0744)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
 		log.Fatalln(err)
 	}
 	for _, subPkg := range nsToPkg.GetPackages() {
 		err = os.Mkdir(filepath.Join(pkgPath, subPkg), 0744)
-		if !errors.Is(err, fs.ErrExist) {
+		if err != nil && !errors.Is(err, fs.ErrExist) {
 			log.Fatalln(err)
 		}
 	}
 
+}
+
+func singlePkgOutput(pkgPath string, generationResult *gen.GenerationResult) {
 	file, err := os.Create(filepath.Join(pkgPath, *outFile))
 	if err != nil {
 		log.Fatalln(err)
@@ -155,11 +142,32 @@ func main() {
 
 	_, _ = file.Write(source)
 
+	// server
+	serverFile, err := os.Create(filepath.Join(pkgPath, "server"+*outFile))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer serverFile.Close()
+
+	serverData := new(bytes.Buffer)
+	serverData.Write(generationResult.ServerHeader)
+	serverData.Write(generationResult.ServerWSDL)
+	serverData.Write(generationResult.Server)
+
+	serverSource, err := format.Source(serverData.Bytes())
+	if err != nil {
+		serverFile.Write(serverData.Bytes())
+		log.Fatalln(err)
+	}
+	serverFile.Write(serverSource)
+
+}
+
+func multiPkgOutput(pkgPath string, generationResult *gen.GenerationResult) {
+
 	// all types in subpackages
 	for _, subPkg := range nsToPkg.GetPackages() {
-		log.Println("subPkg", subPkg)
-		log.Println("pkg", pkgPath)
-		log.Println("Generating", filepath.Join(pkgPath, subPkg, subPkg+".go"))
+		log.Println("Writing file ", filepath.Join(pkgPath, subPkg, subPkg+".go"))
 		pkgFile, err := os.Create(filepath.Join(pkgPath, subPkg, subPkg+".go"))
 		if err != nil {
 			log.Fatalln(err)
@@ -179,24 +187,39 @@ func main() {
 		_, _ = pkgFile.Write(source)
 	}
 
-	// server
-	serverFile, err := os.Create(filepath.Join(pkgPath, "server"+*outFile))
+}
+
+func main() {
+
+	setup()
+
+	wsdlPath := flag.Args()[0]
+	if *outFile == wsdlPath {
+		log.Fatalln("Output file cannot be the same WSDL file")
+	}
+
+	// load wsdl
+	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, nsToPkg, *pkgBaseUrl, *insecure, *makePublic)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer serverFile.Close()
 
-	serverData := new(bytes.Buffer)
-	serverData.Write(generationResult.ServerHeader)
-	serverData.Write(generationResult.ServerWSDL)
-	serverData.Write(generationResult.Server)
-
-	serverSource, err := format.Source(serverData.Bytes())
+	log.Println("Generating code...")
+	// generate code
+	generationResult, err := gowsdl.Start()
 	if err != nil {
-		serverFile.Write(serverData.Bytes())
 		log.Fatalln(err)
 	}
-	serverFile.Write(serverSource)
+
+	pkgPath := filepath.Join(*dir, *pkg)
+	createDirs(pkgPath)
+
+	log.Println("Generating files...")
+	if len(nsToPkg) == 0 {
+		singlePkgOutput(pkgPath, generationResult)
+	} else {
+		multiPkgOutput(pkgPath, generationResult)
+	}
 
 	log.Println("Done 👍")
 }
